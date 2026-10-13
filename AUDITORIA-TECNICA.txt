@@ -1,0 +1,100 @@
+AUDITORIA TECNICA — MACROMARKET
+Data da auditoria: 12/10/2026
+Escopo: revisao estatica do frontend, dependencias e verificacoes de build/lint.
+Restricao atendida: nenhum codigo da aplicacao foi alterado; este relatorio e o unico arquivo novo.
+
+RESUMO EXECUTIVO
+
+O projeto compila e passa no lint, mas ainda funciona como prototipo visual com dados simulados. Os riscos mais importantes para evoluir para um terminal confiavel sao: graficos e correlacoes que nao representam calculos historicos reais, formatacao de precos que confunde indices/moedas/cripto, e ausencia de persistencia e testes automatizados. Alguns controles da interface tambem parecem interativos, mas nao executam acao.
+
+Nao foi encontrada vulnerabilidade em dependencias de producao pelo comando "npm audit --omit=dev". O comando "npm audit" completo reportou 5 alertas de severidade alta em dependencias de desenvolvimento, associados a braces e a cadeia micromatch/fast-glob/eslint-config-next. A correcao sugerida automaticamente pelo npm exigiria --force e rebaixaria eslint-config-next para a versao 14.2.35; nao aplicar essa correcao sem definir uma versao compativel com Next.js 16.
+
+PONTOS FORTES OBSERVADOS
+
+- A compilacao de producao (npm run build) concluiu com sucesso.
+- O lint (npm run lint) concluiu com sucesso.
+- A interface declara explicitamente que os dados sao demonstrativos e que a carteira e ficticia.
+- Existem estados vazios, validacao basica de quantidade/preco e layout com regras para telas menores.
+- O codigo usa TypeScript com verificacao estrita configurada no projeto.
+
+ACHADOS PRIORIZADOS
+
+1. P1 — Dados de grafico e periodos nao correspondem a historico de mercado
+Evidencia: app/page.tsx, linhas 48-125, 156-163 e 240-265.
+Os ativos contem series curtas fixas; todos os periodos reutilizam 12 pontos. Ao mudar o periodo, os pontos sao alterados por uma expressao deterministica (shift), nao por observacoes daquele intervalo. As series tem valores normalizados aproximados, mas o tooltip as apresenta como pontos (pts), inclusive para acoes, cambio e cripto. Isso pode induzir a uma leitura incorreta da escala, do intervalo e do movimento.
+Melhoria recomendada: conectar a uma fonte de dados documentada, manter timestamps, moeda/unidade e granularidade explicitas, tratar cotacoes ausentes/atrasadas e gerar cada periodo a partir da serie correspondente. Enquanto forem demonstrativos, identificar o grafico como simulado e nao sugerir que o periodo e historico real.
+
+2. P1 — Correlacao e insights sao valores fixos, nao calculados
+Evidencia: app/page.tsx, linhas 165-171 e 699-725.
+A matriz esta codificada manualmente e os textos de leitura rapida tambem sao constantes. A selecao dos ativos altera linhas/colunas exibidas, mas nao recalcula os coeficientes nem os insights. O controle "30 dias" aparenta ser um seletor de periodo, porem nao tem acao. Assim, os numeros nao resultam de retornos historicos observados.
+Melhoria recomendada: calcular correlacao de Pearson sobre retornos alinhados por timestamp e janela selecionada; tratar historicos insuficientes e dados faltantes; manter simetria/diagonal da matriz; recalcular insights conforme selecao e janela; remover ou implementar controles sem acao. Exibir periodo, tamanho da amostra e natureza demonstrativa dos dados.
+
+3. P1 — Formato monetario aplicado a instrumentos com unidades distintas
+Evidencia: app/page.tsx, linhas 169-174, 581, 621-633 e 787.
+formatCurrency usa BRL como moeda padrao em toda a aplicacao. Isso apresenta indices como Ibovespa e S&P 500 como valores em reais, e tambem trata o Bitcoin como BRL sem uma unidade claramente associada. Alem disso, os dados da home e os detalhes repetem precos em formatos diferentes.
+Melhoria recomendada: definir unidade/moeda por ativo (por exemplo, pontos de indice, BRL por acao, BRL por BTC ou cotacao USD/BRL) e formatar cada instrumento com essa metainformacao; nao chamar pontos de indice de preco monetario.
+
+4. P1 — Indicadores e estado de mercado apresentados como fatos fixos
+Evidencia: app/page.tsx, linhas 495-498, 520 e 566; indicadores em 629-634.
+O status "MERCADO ABERTO", o tempo para fechamento, o horario de atualizacao, a data do topo, a volatilidade, maxima/minima e media movel sao textos ou valores fixos/derivados por multiplicadores. Nao acompanham relogio, calendario de negociacao, ativo ou dados de mercado. O aviso geral de dados demonstrativos reduz o risco de interpretacao, mas nao torna essas informacoes atualizadas.
+Melhoria recomendada: calcular data e horarios com fuso/feriados da bolsa e obter indicadores de series validadas; mostrar horario e atraso reais da fonte; se nao houver fonte, trocar status e indicadores por valores explicitamente ilustrativos ou remover os que sugerem atualizacao.
+
+5. P1 — Alertas altos nas dependencias de desenvolvimento
+Evidencia: package.json/package-lock.json; verificacao npm audit executada nesta auditoria.
+O npm audit completo encontrou 5 alertas altos na cadeia braces -> micromatch -> fast-glob -> @next/eslint-plugin-next -> eslint-config-next. O npm audit --omit=dev nao encontrou vulnerabilidades de producao. A sugestao automatica audit fix --force introduziria uma versao 14 do eslint-config-next num projeto Next 16, com risco de incompatibilidade.
+Melhoria recomendada: identificar os intervalos e versoes transitivas no lockfile, atualizar de forma compativel a cadeia de lint para a linha 16 e repetir npm audit/build/lint. Evitar --force sem revisao e registrar excecoes temporarias, se necessarias.
+
+6. P2 — Carteira nao persiste e e redefinida ao recarregar
+Evidencia: app/page.tsx, linhas 130-150 e 347-353; atualizacao em 412-442.
+As posicoes sao mantidas somente em useState e inicializadas com uma carteira de exemplo. Compras adicionadas e posicoes removidas desaparecem ao atualizar ou fechar a pagina. Nao ha armazenamento de transacoes nem separacao entre dados demonstrativos e carteira do usuario.
+Melhoria recomendada: decidir o modelo de persistencia (conta/backend ou armazenamento local claramente identificado), manter historico de compras/vendas e calcular preco medio a partir das transacoes. Informar quando a carteira for apenas uma simulacao local.
+
+7. P2 — Acoes visuais sem comportamento
+Evidencia: app/page.tsx, linhas 500, 519 e 574-575; controle de periodo de correlacao em 704-706.
+O botao de perfil e o de notificacoes nao possuem acao. As abas "Em alta", "Em queda" e "Mais negociados" sao spans estaticos, nao controles. O seletor "30 dias" da correlacao tambem nao altera o periodo. A aparencia sugere funcionalidades que ainda nao existem.
+Melhoria recomendada: implementar as acoes, fornecer estados vazios/feedback, ou converter esses elementos em conteudo nao interativo ate que sejam funcionais.
+
+8. P2 — Busca indisponivel em telas pequenas
+Evidencia: app/globals.css, linhas 1856-1885.
+No breakpoint de 620 px, o campo e o atalho da busca sao ocultados; resta o icone sem comportamento de abertura. Em dispositivos moveis nao e possivel usar a busca global.
+Melhoria recomendada: transformar o icone em botao acessivel que abre um campo/modal de busca, ou manter um campo compacto visivel e funcional.
+
+9. P2 — Interacao da tabela e dialogo precisam de suporte de acessibilidade
+Evidencia: app/page.tsx, linhas 737-745 e 784-790.
+Linhas da tabela inteira navegam por onClick, mas nao sao elementos focaveis/acionaveis por teclado. O dialogo tem role e aria-labelledby, porem nao demonstra gestao de foco (entrada, confinamento e retorno) nem fechamento por Escape.
+Melhoria recomendada: usar link/botao semantico para a acao de abrir ativo, manter tabela com semantica nativa e implementar ciclo de foco, foco inicial e Escape no dialogo. Verificar tambem uma alternativa textual para os graficos canvas.
+
+10. P2 — Nenhuma suite de testes automatizados identificada
+Evidencia: package.json nao define script "test"; nao foram encontrados arquivos com padroes *.test.* ou *.spec.* na busca do workspace.
+Lint e build verificam qualidade estatica e compilacao, mas nao protegem regras de carteira, calculo de preco medio, filtros, periodos ou matriz.
+Melhoria recomendada: adicionar testes unitarios para calculos e componentes/filtros, mais testes de interacao para adicionar/remover posicoes e navegacao; incluir validacao de acessibilidade e layout responsivo.
+
+11. P2 — Pagina muito concentrada em um unico componente client-side
+Evidencia: app/page.tsx, linha 1 e linhas 347-800+.
+A pagina inteira e marcada como Client Component e concentra dados, formatacao, graficos, navegacao, formularios e quatro telas em um arquivo extenso. Isso dificulta isolar regras, testar calculos e controlar a quantidade de JavaScript enviada ao navegador.
+Melhoria recomendada: extrair componentes por tela e componentes compartilhados; mover dados e calculos para modulos tipados independentes; manter no cliente apenas as ilhas que realmente precisam de estado/eventos e avaliar renderizacao de conteudo estatico no servidor.
+
+12. P3 — Busca e selecao de tela nao estao refletidas na URL
+Evidencia: app/page.tsx, linhas 347-353 e handlers de navegacao, linhas 488-491.
+As telas sao trocadas por estado local em uma unica rota. A URL nao permite abrir diretamente uma tela/ativo, compartilhar uma consulta ou usar voltar/avancar do navegador para desfazer a navegacao interna.
+Melhoria recomendada: definir rotas ou query parameters para telas e ativo selecionado, respeitando navegacao nativa do Next.js e historico do navegador.
+
+ORDEM SUGERIDA DE TRABALHO
+
+1. Definir se o produto continuara sendo demonstrativo ou passara a usar provedores reais; documentar unidade, moeda, origem, frequencia e atraso dos dados.
+2. Corrigir a semantica dos precos e impedir que graficos/indicadores sinteticos parecam calculos reais; implementar historico e correlacao verdadeiros antes de uso para analise financeira.
+3. Resolver dependencias de desenvolvimento vulneraveis sem downgrade forcado e adicionar testes para calculos financeiros.
+4. Persistir a carteira e implementar os controles que hoje sao apenas visuais.
+5. Melhorar acessibilidade, experiencia mobile, divisao de componentes e navegacao por URL.
+
+VERIFICACOES EXECUTADAS
+
+- npm run lint: sucesso.
+- npm run build: sucesso; rota "/" gerada estaticamente.
+- npm audit --omit=dev: 0 vulnerabilidades reportadas.
+- npm audit: 5 alertas altos em dependencias de desenvolvimento.
+- Busca por arquivos de teste *.test.* e *.spec.*: nenhum encontrado.
+
+LIMITACAO
+
+Esta auditoria foi baseada no codigo e nas dependencias presentes no workspace. Nao houve validacao de um provedor de mercado, backend, deploy, autenticacao ou comportamento com dados reais, pois esses componentes nao foram identificados no escopo revisado.
